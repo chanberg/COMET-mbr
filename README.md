@@ -15,14 +15,14 @@
 > 4) Length Batching for faster inference (thanks to [@CoderPat](https://github.com/CoderPat))
 > 5) Integration with SacreBLEU for dataset downloading (thanks to [@mjpost](https://github.com/mjpost))
 > 6) Monte-carlo Dropout for uncertainty estimation (thanks to [@glushkovato](https://github.com/glushkovato) and [@chryssa-zrv](https://github.com/chryssa-zrv))
-> 7) Some code refactoring 
+> 7) Some code refactoring
 
 ## Quick Installation
 
 Simple installation from PyPI
 
 ```bash
-pip install --upgrade pip  # ensures that pip is current 
+pip install --upgrade pip  # ensures that pip is current
 pip install unbabel-comet
 ```
 or
@@ -109,6 +109,13 @@ Nonetheless, if your data does not have repetitions and you have more than 1 GPU
 comet-score -s src.de -t hyp1.en -r ref.en --gpus 2
 ```
 
+#### Minimum Bayes Risk Decoding:
+MBR decoding can be performed with the `run_mbr.py` script. You need a txt file for the source sentences, the candidate translations and the support hypotheses. The format is one sentence per line. The number of lines in the candidate and support files need to be a multiple of the number of lines in the source file (line 1 = source sent one, line 1-100 = candidates for source sent 1 with 100 samples).
+
+```bash
+python run_mbr.py -s src.de -c candidates.en -t support.en -nc 100 -ns 100 -o mbr_out.txt
+```
+
 #### Changing Embedding Cache Size:
 You can change the cache size of COMET using the following env variable:
 
@@ -159,7 +166,7 @@ These two models were developed to participate on the WMT20 Metrics shared task 
 
 For more information about the available COMET models read our metrics descriptions [here](METRICS.md)
 
-## Train your own Metric: 
+## Train your own Metric:
 
 Instead of using pretrained models your can train your own model with the following command:
 ```bash
@@ -187,13 +194,10 @@ If you use COMET please cite our work! Also, don't forget to say which model you
 
 - [Are References Really Needed? Unbabel-IST 2021 Submission for the Metrics Shared Task](http://statmt.org/wmt21/pdf/2021.wmt-1.111.pdf)
 
-- [Uncertainty-Aware Machine Translation Evaluation](https://aclanthology.org/2021.findings-emnlp.330/) 
+- [Uncertainty-Aware Machine Translation Evaluation](https://aclanthology.org/2021.findings-emnlp.330/)
 
 - [COMET - Deploying a New State-of-the-art MT Evaluation Metric in Production](https://www.aclweb.org/anthology/2020.amta-user.4)
 
 - [Unbabel's Participation in the WMT20 Metrics Shared Task](https://aclanthology.org/2020.wmt-1.101/)
 
 - [COMET: A Neural Framework for MT Evaluation](https://www.aclweb.org/anthology/2020.emnlp-main.213)
-
-
-

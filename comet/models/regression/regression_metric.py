@@ -137,7 +137,10 @@ class RegressionMetric(CometModel):
         return [optimizer], []
 
     def prepare_sample(
-        self, sample: List[Dict[str, Union[str, float]]], inference: bool = False
+        self,
+        sample: List[Dict[str, Union[str, float]]],
+        inference: bool = False,
+        mbr: bool = False
     ) -> Union[
         Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]], Dict[str, torch.Tensor]
     ]:
@@ -146,19 +149,26 @@ class RegressionMetric(CometModel):
 
         :param sample: list of dictionaries.
         :param inference: If set to true prepares only the model inputs.
+        :param mbr: If set to true prepares for mbr score computations.
 
         :returns: Tuple with 2 dictionaries (model inputs and targets).
             If `inference=True` returns only the model inputs.
         """
         sample = {k: [dic[k] for dic in sample] for k in sample[0]}
         src_inputs = self.encoder.prepare_sample(sample["src"])
-        mt_inputs = self.encoder.prepare_sample(sample["mt"])
-        ref_inputs = self.encoder.prepare_sample(sample["ref"])
+
+        if mbr:
+            mt_inputs = self.encoder.prepare_sample([h for s in sample["mt"] for h in s])
+            ref_inputs = self.encoder.prepare_sample([h for s in sample["ref"] for h in s])
+        else:
+            mt_inputs = self.encoder.prepare_sample(sample["mt"])
+            ref_inputs = self.encoder.prepare_sample(sample["ref"])
 
         src_inputs = {"src_" + k: v for k, v in src_inputs.items()}
         mt_inputs = {"mt_" + k: v for k, v in mt_inputs.items()}
         ref_inputs = {"ref_" + k: v for k, v in ref_inputs.items()}
-        inputs = {**src_inputs, **mt_inputs, **ref_inputs}
+        inputs = {**src_inputs, **mt_inputs, **ref_inputs,
+                  "mbr":mbr, "batch_size": len(sample["src"])}
 
         if inference:
             return inputs
@@ -174,23 +184,64 @@ class RegressionMetric(CometModel):
         mt_attention_mask: torch.tensor,
         ref_input_ids: torch.tensor,
         ref_attention_mask: torch.tensor,
+        mbr: bool,
+        batch_size: int,
         **kwargs
     ) -> Dict[str, torch.Tensor]:
         src_sentemb = self.get_sentence_embedding(src_input_ids, src_attention_mask)
         mt_sentemb = self.get_sentence_embedding(mt_input_ids, mt_attention_mask)
         ref_sentemb = self.get_sentence_embedding(ref_input_ids, ref_attention_mask)
 
-        diff_ref = torch.abs(mt_sentemb - ref_sentemb)
-        diff_src = torch.abs(mt_sentemb - src_sentemb)
+        if not mbr:
 
-        prod_ref = mt_sentemb * ref_sentemb
-        prod_src = mt_sentemb * src_sentemb
+            diff_ref = torch.abs(mt_sentemb - ref_sentemb)
+            diff_src = torch.abs(mt_sentemb - src_sentemb)
 
-        embedded_sequences = torch.cat(
-            (mt_sentemb, ref_sentemb, prod_ref, diff_ref, prod_src, diff_src),
-            dim=1,
-        )
-        return {"score": self.estimator(embedded_sequences)}
+            prod_ref = mt_sentemb * ref_sentemb
+            prod_src = mt_sentemb * src_sentemb
+
+            embedded_sequences = torch.cat(
+                (mt_sentemb, ref_sentemb, prod_ref, diff_ref, prod_src, diff_src),
+                dim=1,
+            )
+            return {"score": self.estimator(embedded_sequences)}
+
+        else:
+            # create sample size, batch size, emb vectors format
+            mt_num_sents = len(mt_sentemb) // batch_size
+            mt_sentemb = torch.reshape(mt_sentemb, (batch_size, mt_num_sents, -1))
+            mt_sentemb = torch.transpose(mt_sentemb, 1, 0)
+            ref_num_sents = len(ref_sentemb) // batch_size
+            ref_sentemb = torch.reshape(ref_sentemb, (batch_size, ref_num_sents, -1))
+            ref_sentemb = torch.transpose(ref_sentemb, 1, 0)
+
+            # compare candidates to source sentences and repeate to size of mt_num_sents x ref_num_sents
+            diff_src = torch.abs(mt_sentemb - src_sentemb)
+            diff_src = torch.repeat_interleave(diff_src, ref_num_sents, dim=0)
+            prod_src = mt_sentemb * src_sentemb
+            prod_src = torch.repeat_interleave(prod_src, ref_num_sents, dim=0)
+
+            # create offset representations to be able to compare all candidates and support samples
+            mt_sentemb = torch.repeat_interleave(mt_sentemb, ref_num_sents, dim=0)
+            ref_sentemb = ref_sentemb.repeat(mt_num_sents, 1, 1)
+
+            # create comparison vectors between candidates and support samples
+            diff_ref = torch.abs(mt_sentemb - ref_sentemb)
+            prod_ref = mt_sentemb * ref_sentemb
+
+            embedded_sequences = torch.cat(
+                (mt_sentemb, ref_sentemb, prod_ref, diff_ref, prod_src, diff_src),
+                dim=-1,)
+
+            # run through prediction layer and convert to batch size, mt_num_sents, ref_num_sents format
+            num_comparisons = len(embedded_sequences)
+            seg_scores = self.estimator(embedded_sequences)
+            seg_scores = torch.transpose(seg_scores, 0, 1)
+            seg_scores = torch.reshape(seg_scores, [batch_size, mt_num_sents, ref_num_sents]).contiguous()
+
+            return {"score": seg_scores}
+
+
 
     def read_csv(self, path: str) -> List[dict]:
         """Reads a comma separated value file.

@@ -549,3 +549,67 @@ class CometModel(ptl.LightningModule, metaclass=abc.ABCMeta):
                 predictions = unsorted_predictions
 
             return predictions, sum(predictions) / len(predictions)
+
+    def get_utility_scores(
+        self,
+        samples: List[Dict[str, str]],
+        batch_size: int = 8,
+        gpus: int = 1,
+        progress_bar: bool = True,
+        accelerator: str = "ddp",
+        num_workers: int = None
+    ) -> Union[Tuple[List[float], float], Tuple[List[float], List[float], float]]:
+        """Function that receives a list of samples (dictionaries with candidates, sources and/or support samples)
+        and returns MBR scores for all candidate - support sample pairs.
+
+        :param samples: List with dictionaries with source, candidates and/or support samples.
+        :param batch_size: Batch size used during inference.
+        :gpus: Number of GPUs to be used.
+        :param progress_bar: Flag that turns on and off the predict progress bar.
+        :param accelarator: Pytorch Lightning accelerator (e.g: dp, ddp).
+        :param num_workers: Number of workers to use when loading data from dataloaders.
+
+        :return: List of lists with segment-level scores for each candidate - support sample pair.
+        """
+        # HACK: Workaround pytorch bug that prevents ParameterList to be used in DP
+        # https://github.com/pytorch/pytorch/issues/36035
+        if self.layerwise_attention is not None and gpus > 1:
+            self.layerwise_attention.gamma_value = float(
+                self.layerwise_attention.gamma[0]
+            )
+            self.layerwise_attention.weights = [
+                float(parameter[0])
+                for parameter in self.layerwise_attention.scalar_parameters
+            ]
+
+        self.eval()
+        dataloader = DataLoader(
+            dataset=samples,
+            batch_size=batch_size,
+            collate_fn=lambda x: self.prepare_sample(x, inference=True, mbr=True),
+            num_workers=num_workers or multiprocessing.cpu_count(),
+        )
+        accelerator = accelerator if gpus > 1 else None
+
+        if progress_bar:
+            trainer = ptl.Trainer(
+                gpus=gpus,
+                deterministic=True,
+                logger=False,
+                callbacks=[PredictProgressBar()],
+                accelerator=accelerator,
+            )
+        else:
+            trainer = ptl.Trainer(
+                gpus=gpus,
+                deterministic=True,
+                logger=False,
+                progress_bar_refresh_rate=0,
+                accelerator=accelerator,
+            )
+
+        predictions = trainer.predict(
+                self, dataloaders=dataloader, return_predictions=True
+            )
+
+        return predictions
