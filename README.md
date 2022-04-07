@@ -115,6 +115,28 @@ MBR decoding can be performed with the `run_mbr.py` script. You need a txt file 
 ```bash
 python run_mbr.py -s src.de -c candidates.en -t support.en -nc 100 -ns 100 -o mbr_out.txt
 ```
+To get the individual MBR scores for the sensitivity analysis (with a potentially variable number of candidates), construct a json file of the following format containing the source sentence and at least one candidate. The candidates can be arbitrarily named:
+
+```bash
+{
+  "0": {
+    "src": "Dem Feuer konnte Einhalt geboten werden",
+    "cand-1": "The fire could be stopped",
+    "cand-2": "They were able to control the fire."
+  },
+  "1": {
+      "src": "Schulen und Kindergärten sind geöffnet",
+      "cand-1": "Schools and kindergartens were open",
+      "cand-2": "Schools and kindergartens were open"
+  },
+  ...
+}
+```
+Then you can run the following script and it will return a json file of the same structure but with a list where the first element is the sentence and the second the MBR score.
+
+```bash
+python run_mbr_for_sensitivity.py -j candidates.json -t support.en -ns 100 -o mbr_out.json
+```
 
 #### Changing Embedding Cache Size:
 You can change the cache size of COMET using the following env variable:
